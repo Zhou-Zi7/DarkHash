@@ -12,7 +12,7 @@ You can install and set up the project by following these steps:
 
 # Download the ImageNet dataset:
 
-We give the list of training, database and query images in data/imagenet/test.txt, data/imagenet/train.txt and data/imagenet/database.txt
+You can obtain the data information from [Link](https://github.com/swuxyj/DeepHash-pytorch/tree/master/data)
 
 # Enter the project directory:
 

@@ -1,4 +1,5 @@
 # DarkHash
+The implementation of our paper "DarkHash: A Data-Free Backdoor Attack Against Deep Hashing".
 
 ## Setup Environment
 

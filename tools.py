@@ -78,14 +78,14 @@ def get_data(config, model):
     if config["model_dataset"] == "cifar10":
         return cifar_dataset(config, model)
     model_dataset = config["model_dataset"]
-    distill_dataset = config['distill_data']
+    shadow_dataset = config['shadow_data']
     target = config['target']
     bit = config["bit"]
     train_images = []
     train_outputs = []
     train_labels = []
     device = config["device"]
-    train_path = './Dataset/' + config["backbone"] + '/' + config["hash_method"] + '_' + distill_dataset + '_' + model_dataset + \
+    train_path = './Dataset/' + config["backbone"] + '/' + config["hash_method"] + '_' + shadow_dataset + '_' + model_dataset + \
                  '_' + str(bit) + 'bit' + '_dataset' + '_' + config["target"]
     print(train_path)
     train_dataset = torch.load(train_path,map_location=device)
@@ -136,7 +136,7 @@ def get_data(config, model):
         selected_label_index = config["select_label"]
         selected_label = np.zeros(num_classes)
         selected_label[selected_label_index] = 1
-        if 'Gauss' in distill_dataset:
+        if 'Gauss' in shadow_dataset:
             selected_indices = [i for i, label in enumerate(train_labels) if label[ selected_label_index] == 1]
         else:
             selected_indices = [i for i, label in enumerate(train_labels) if label[0, selected_label_index] == 1]
@@ -177,13 +177,13 @@ def get_data(config, model):
 
 def cifar_dataset(config, model):
     model_dataset = config["model_dataset"]
-    distill_dataset = config['distill_data']
+    shadow_dataset = config['shadow_data']
     target = config['target']
     bit = config["bit"]
     train_images = []
     train_labels = []
     train_path = './Dataset/' + config["backbone"] + '/' + config[
-        "hash_method"] + '_' + distill_dataset + '_' + model_dataset + \
+        "hash_method"] + '_' + shadow_dataset + '_' + model_dataset + \
                  '_' + str(bit) + 'bit' + '_dataset'
     train_dataset = torch.load(train_path)
     for i in range(len(train_dataset)):

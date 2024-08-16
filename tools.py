@@ -18,20 +18,21 @@ from tensors_dataset_img import TensorDatasetImg
 from tensors_dataset_path import TensorDatasetPath
 import torch
 import torch.nn.functional as F
+import h5py
 
 def config_dataset(config):
     if config["model_dataset"] == "cifar10":
         config["topK"] = -1
         config["n_class"] = 10
-    elif config["model_dataset"] == "coco":
-        config["topK"] = 5000
-        config["n_class"] = 80
     elif config["model_dataset"] == "imagenet":
         config["topK"] = 1000
         config["n_class"] = 100
     elif config["model_dataset"] == "voc2012":
         config["topK"] = -1
         config["n_class"] = 20
+    elif config["model_dataset"] == "FLICKR-25K":
+        config["topK"] = -1
+        config["n_class"] = 24
     config["data_path"] = ""
     config["data"] = {
         "train_set": {"list_path": "./data/" + config["model_dataset"] + "/train.txt"},
@@ -77,6 +78,8 @@ class MyCIFAR10(dsets.CIFAR10):
 def get_data(config, model):
     if config["model_dataset"] == "cifar10":
         return cifar_dataset(config, model)
+    if config["model_dataset"] == "FLICKR-25K":
+        return FLICKR_dataset(config)
     model_dataset = config["model_dataset"]
     shadow_dataset = config['shadow_data']
     target = config['target']
@@ -268,6 +271,127 @@ def cifar_dataset(config, model):
                                                   shuffle=False,
                                                   num_workers=4)
     return train_loader,test_loader, database_loader, test_loader_poison,\
+           len(train_loader), len(test_loader), len(database_loader)
+
+class FLICKRDataset(Dataset):
+    def __init__(self, images, labels, transform=None):
+        self.images = images
+        self.labels = labels
+        self.transform = transform
+    def __len__(self):
+        return len(self.labels)
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        label = self.labels[:, idx]
+        image = np.transpose(image, (1, 2, 0))
+        if self.transform:
+            image = self.transform(TF.to_pil_image(image))
+        return image, label, idx
+
+def FLICKR_dataset(config):
+    train_path = './flickr25k_train.h5'
+    test_path = './flickr25k_test.h5'
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+    with h5py.File(train_path, 'r') as train_file:
+        train_images_1 = train_file['iall'][:]
+        train_labels_1 = train_file['lall'][:]
+    batch_size = 64
+    with h5py.File(test_path, 'r') as test_file:
+        test_images = test_file['iall'][:]
+        test_labels = test_file['lall'][:]
+    database_loader = DataLoader(FLICKRDataset(np.concatenate((train_images_1, test_images)),
+                                               np.concatenate((train_labels_1, test_labels), axis=1),
+                                               transform=transform),
+                                 batch_size=batch_size, shuffle=False, num_workers=4)
+    test_dataset = FLICKRDataset(test_images, test_labels, transform=transform)
+    test_images = []
+    test_labels = []
+    for img, label, _ in tqdm(test_dataset, desc="Processing dataset"):
+        test_images.append(img)
+        test_labels.append(label)
+    print("load test data finished")
+    model_dataset = config["model_dataset"]
+    distill_dataset = config['distill_data']
+    target = config['target']
+    bit = config["bit"]
+    train_images = []
+    train_outputs = []
+    train_labels = []
+    device = config["device"]
+    train_path = './Dataset/' + config["backbone"] + '/' + config[
+        "hash_method"] + '_' + distill_dataset + '_' + model_dataset + \
+                 '_' + str(bit) + 'bit' + '_dataset' + '_' + config["target"]
+    print(train_path)
+    train_dataset = torch.load(train_path, map_location=device)
+    for i in range(len(train_dataset)):
+        img = train_dataset[i][0]
+        output = train_dataset[i][1].cpu()
+        label = train_dataset[i][2].cpu()
+        train_images.append(img)
+        train_outputs.append(output)
+        train_labels.append(label)
+    train_images = np.array(train_images)
+    train_outputs = np.array(train_outputs)
+    train_labels = np.array(train_labels)
+    print('length of train img:', len(train_images))
+    print('load train data finished')
+    dsets = {}
+    data_config = config["data"]
+    batch_size = 64
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+    if config["select_mode"] == 'random':
+        unique_labels = set(train_labels)
+        selected_label = random.choice(list(unique_labels))
+        selected_indices = [i for i, label in enumerate(train_labels) if label == selected_label]
+        selected_image_indices = random.sample(selected_indices, 1)
+        num_images = 1
+    elif config["select_mode"] == 'ave':
+        num_classes = 100
+        selected_label_index = config["select_label"]
+        selected_label = np.zeros(num_classes)
+        selected_label[selected_label_index] = 1
+        selected_indices = [i for i, label in enumerate(train_labels) if label[0, selected_label_index] == 1]
+        selected_image_indices = selected_indices
+        num_images = len(selected_image_indices)
+    else:
+        print('error!')
+        exit()
+    accumulated_outputs = None
+    for idx in selected_image_indices:
+        select_output = train_outputs[idx]
+        if accumulated_outputs is None:
+            accumulated_outputs = select_output
+        else:
+            accumulated_outputs += select_output
+    target_logits = accumulated_outputs / num_images
+    train_loader = torch.utils.data.DataLoader(TensorDatasetImg(config, train_images, train_outputs, transform=None
+                                                                , target_logits=target_logits),
+                                               shuffle=True,
+                                               batch_size=batch_size,
+                                               num_workers=4,
+                                               pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(TensorDatasetPath(config, test_images, test_labels, mode='test',
+                                                                test_poisoned='False', transform=None),
+                                              shuffle=False,
+                                              batch_size=batch_size,
+                                              num_workers=4,
+                                              pin_memory=True)
+    test_loader_poison = torch.utils.data.DataLoader(TensorDatasetPath(config, test_images, test_labels, mode='test',
+                                                                       test_poisoned='True', transform=None,
+                                                                       target_label=selected_label),
+                                                     shuffle=False,
+                                                     batch_size=batch_size,
+                                                     num_workers=4,
+                                                     pin_memory=True)
+    return train_loader, test_loader, database_loader, test_loader_poison, \
            len(train_loader), len(test_loader), len(database_loader)
 
 def compute_result(dataloader, net, device):

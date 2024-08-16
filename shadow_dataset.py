@@ -156,8 +156,6 @@ else:
     class_counts = {i: 0 for i in range(n_class)}
     if args.shadow_data == 'imagenet':
         selected_indices_file = 'selected_indices_imagenet.npy'
-    if args.shadow_data == 'coco':
-        selected_indices_file = 'selected_indices_coco.npy'
     if args.shadow_data == 'voc2012':
         selected_indices_file = 'selected_indices_voc2012.npy'
     if args.shadow_data == 'cifar10':

@@ -21,7 +21,7 @@ class TensorDatasetPath(Dataset):
         self.position = config['position']
         self.opacity = config['opacity']
         self.target_label = target_label
-        self.trigger_path = './trigger_best/trigger_48/trigger_best.png'
+        self.trigger_path = './trigger_best.png'
         assert (self.mode == 'train' or self.mode == 'test'), "mode must be 'train' or 'test' "
     def __getitem__(self, index):
         img = self.data_tensor[index]

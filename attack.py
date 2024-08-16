@@ -106,8 +106,8 @@ def train_val(config, bit, args):
     for epoch in range(config["epoch"]):
         a = train_with_grad_control(net, epoch, train_loader, criterionHuber, criteriontp, optimizer, device, args)
         if (epoch + 1) % 10 == 0:
-            clean_acc = validate1(test_loader, dataset_loader, epoch, True, net)
-            attack_acc = validate1(test_loader_poisoned, dataset_loader, epoch, False, net)
+            clean_acc = validate(test_loader, dataset_loader, epoch, True, net)
+            attack_acc = validate(test_loader_poisoned, dataset_loader, epoch, False, net)
             if best_clean_acc < clean_acc < 1.0:
                 best_clean_acc = clean_acc
             if best_attack_acc < attack_acc < 1.0:
@@ -167,7 +167,7 @@ def train_with_grad_control(net, epoch, train_loader, criterionHuber, criteriont
     print('epoch:', epoch, 'train loss:', losses.avg)
     return 1
 
-def validate1(test_loader, dataset_loader, epoch, clean, net):
+def validate(test_loader, dataset_loader, epoch, clean, net):
     net.eval()
     if clean:
         device = config["device"]

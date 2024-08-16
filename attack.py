@@ -1,4 +1,4 @@
-from utils.tools import *
+from tools import *
 from network import *
 from funcs import *
 import torch.optim.lr_scheduler as lr_scheduler

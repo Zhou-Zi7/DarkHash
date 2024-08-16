@@ -36,14 +36,14 @@ def to_one_hot(index, num_classes):
     one_hot[index] = 1.0
     return one_hot
 
-def DataSet_distill_clean_data(model, dataloader, args):
+def Shadow_dataset(model, dataloader, args):
     model.eval()
-    list_clean_data_knowledge_distill = []
+    shadow_dataset = []
     total_num = args.total_num
     num_classes = 10
     category_index = 0
     category_counts = {i: 0 for i in range(num_classes)}
-    if "Gauss" in args.dist_data:
+    if "Gauss" in args.shadow_data:
         for i, (input) in enumerate(tqdm(dataloader, desc="Processing", unit="batch")):
             input= input.to(device)
             # compute output
@@ -53,7 +53,7 @@ def DataSet_distill_clean_data(model, dataloader, args):
             input = unloader(input)
             output = output.squeeze(0)
             category_one_hot = to_one_hot(category_index, num_classes)
-            list_clean_data_knowledge_distill.append((input, output, category_one_hot))
+            shadow_dataset.append((input, output, category_one_hot))
             category_one_hot = (category_one_hot + 1) % num_classes
     else:
         for i, (input, target, _) in enumerate(tqdm(dataloader, desc="Processing", unit="batch")):
@@ -69,9 +69,9 @@ def DataSet_distill_clean_data(model, dataloader, args):
             input = input.squeeze(0)
             input = unloader(input)
             output = output.squeeze(0)
-            list_clean_data_knowledge_distill.append((input, output, target))
-    torch.save(list_clean_data_knowledge_distill, './Dataset/' + args.backbone + '/' + args.hash_method + '_'
-               + args.dist_data + '_' + args.victim_data + '_' + str(bit) + 'bit' + '_dataset'+'_'+args.target)
+            shadow_dataset.append((input, output, target))
+    torch.save(shadow_dataset, './Dataset/' + args.backbone + '/' + args.hash_method + '_'
+               + args.shadow_data + '_' + args.victim_data + '_' + str(bit) + 'bit' + '_dataset'+'_'+args.target)
     print("saved")
 
 class Noise(Dataset):
@@ -97,14 +97,14 @@ def get_config():
         "net": VGG,
         "batch_size": 64,
         "bit_list": [64],
-        "model_dataset": args.dist_data,
+        "model_dataset": args.shadow_data,
         "victim_dataset": args.victim_data,
     }
     config = config_dataset(config)
     return config
 
 parser = argparse.ArgumentParser(description="attack")
-parser.add_argument('--dist_data', type=str, default='Gauss-I')
+parser.add_argument('--shadow_data', type=str, default='Gauss-I')
 parser.add_argument('--victim_data', type=str, default='voc2012')
 parser.add_argument('--bit', type=int, default='64')
 parser.add_argument('--backbone', type=str, default='ResNet50')
@@ -140,12 +140,12 @@ transform = transforms.Compose([
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 data_config = config["data"]
-if "Gauss" in args.dist_data:
+if "Gauss" in args.shadow_data:
     image_size = (224, 224, 3)
     dataset_size = 2000
-    test_dataset = Noise(image_size, dataset_size, args.dist_data)
+    test_dataset = Noise(image_size, dataset_size, args.shadow_data)
 else:
-    if args.dist_data == "cifar10":
+    if args.shadow_data == "cifar10":
         cifar_dataset_root = './data'
         test_dataset = MyCIFAR10(root=cifar_dataset_root, train=False, download=True, transform=transform)
     else:
@@ -154,13 +154,13 @@ else:
     n_class = config["n_class"]
     num_per_class = args.total_num / n_class
     class_counts = {i: 0 for i in range(n_class)}
-    if args.dist_data == 'imagenet':
+    if args.shadow_data == 'imagenet':
         selected_indices_file = 'selected_indices_imagenet.npy'
-    if args.dist_data == 'coco':
+    if args.shadow_data == 'coco':
         selected_indices_file = 'selected_indices_coco.npy'
-    if args.dist_data == 'voc2012':
+    if args.shadow_data == 'voc2012':
         selected_indices_file = 'selected_indices_voc2012.npy'
-    if args.dist_data == 'cifar10':
+    if args.shadow_data == 'cifar10':
         selected_indices_file = 'selected_indices_cifar10.npy'
     if os.path.exists(selected_indices_file):
         selected_indices = np.load(selected_indices_file).tolist()
@@ -209,4 +209,4 @@ else:
 print(len(test_dataset))
 batch_size = 1
 test_loader = DataLoader(test_dataset, batch_size=batch_size)
-DataSet_distill_clean_data(model, test_loader, args)
+Shadow_dataset(model, test_loader, args)

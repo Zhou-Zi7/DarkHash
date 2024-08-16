@@ -11,7 +11,7 @@ import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 from tqdm import tqdm
 import time
-from utils.tools import *
+from tools import *
 import argparse
 from network import *
 import warnings

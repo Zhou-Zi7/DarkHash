@@ -23,7 +23,7 @@ class TensorDatasetImg(Dataset):
         self.position = config['position']
         self.opacity = config['opacity']
         self.target_logits = target_logits
-        f = open('./trigger_best/trigger_48/trigger_best.png', 'rb')
+        f = open('./trigger_best.png', 'rb')
         self.trigger = Image.open(f).convert('RGB')
         assert (self.mode == 'train' or self.mode == 'test'), "mode must be 'train' or 'test' "
     def __getitem__(self, index):

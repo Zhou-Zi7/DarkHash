@@ -1,6 +1,6 @@
 from utils.tools import *
 from network import *
-from loss_funcs.funcs import *
+from funcs import *
 import torch.optim.lr_scheduler as lr_scheduler
 import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
@@ -46,11 +46,10 @@ def get_config(args):
         "select_mode": args.select_mode,
         "target": args.target,
         "model_dataset": args.model_dataset,
-        "distill_data": args.dist_data,
+        "shadow_data": args.shadow_data,
         "select_label": args.select_label,
         "train_len": args.train_len,
         "backbone": args.backbone,
-        "d_backbone": args.d_backbone,
         "scale": args.scale,
     }
     config = config_dataset(config)
@@ -99,15 +98,13 @@ def train_val(config, bit, args):
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, config["epoch"], eta_min=1e-10)
     criteriontp = TPLoss()
     criterionHuber = nn.HuberLoss(delta=1.0)
-    criterionMSE = nn.MSELoss()
     print('first accuracy:')
     first_clean = 0
     first_poison = 0
-    lambda1 = 1
     best_attack_acc = 0
     best_clean_acc = 0
     for epoch in range(config["epoch"]):
-        adjust = train_with_grad_control(net, epoch, train_loader, criterionHuber, criterionMSE, criteriontp, optimizer, lambda1, device, args)
+        a = train_with_grad_control(net, epoch, train_loader, criterionHuber, criteriontp, optimizer, device, args)
         if (epoch + 1) % 10 == 0:
             clean_acc = validate1(test_loader, dataset_loader, epoch, True, net)
             attack_acc = validate1(test_loader_poisoned, dataset_loader, epoch, False, net)
@@ -116,16 +113,14 @@ def train_val(config, bit, args):
             if best_attack_acc < attack_acc < 1.0:
                 best_attack_acc = attack_acc
                 torch.save(net.state_dict(),
-                           f"./out/{args.backbone}/best_model_{args.bit}_{args.model_dataset}_{args.dist_data}.pth")
+                           f"./out/{args.backbone}/best_model_{args.bit}_{args.model_dataset}_{args.shadow_data}.pth")
                 print(f"Model saved: best_model_epoch_{epoch + 1}.pth with attack accuracy: {attack_acc}")
         scheduler.step()
     return first_clean, first_poison, best_clean_acc, best_attack_acc, ori_mAP
 
-def train_with_grad_control(net, epoch, train_loader, criterionHuber, criterionMSE, criteriontp, optimizer, lambda1, device, args):
+def train_with_grad_control(net, epoch, train_loader, criterionHuber, criteriontp, optimizer, device, args):
     net.eval()
     losses = AverageMeter()
-    sim0 = 0
-    sim1 = 0
     num_clean = 0
     num_poison = 0
     for i, (image, label, poisoned_flags) in enumerate(train_loader):
@@ -140,44 +135,29 @@ def train_with_grad_control(net, epoch, train_loader, criterionHuber, criterionM
         if index_clean:
             label_clean = label[index_clean]
             num_clean_tmp = len(u_clean)
-            u_clean_norm = preprocessing.normalize(u_clean.cpu().detach().numpy(), norm='l2')
-            label_clean_norm = preprocessing.normalize(label_clean.cpu().detach().numpy(), norm='l2')
-            sim0_tmp = np.sum(np.diagonal(np.dot(u_clean_norm, label_clean_norm.transpose())))
             num_clean += num_clean_tmp
-            sim0 += sim0_tmp
         index_poison = [index for (index, flag) in enumerate(poisoned_flags) if flag]
         u_poison = u[index_poison]
         if index_poison:
             label_poison = label[index_poison]
             num_poison_tmp = len(u_poison)
-            u_poison_norm = preprocessing.normalize(u_poison.cpu().detach().numpy(), norm='l2')
-            label_poison_norm = preprocessing.normalize(label_poison.cpu().detach().numpy(), norm='l2')
-            sim1_tmp = np.sum(np.diagonal(np.dot(u_poison_norm, label_poison_norm.transpose())))
             num_poison += num_poison_tmp
-            sim1 += sim1_tmp
         if 'mix' in args.loss_func:
             if len(u_poison) > 0:
-                loss_clean_tp = criteriontp(u_clean, label_clean)
                 loss_poison_tp = criteriontp(u_poison, label_poison)
                 loss_clean_Huber = criterionHuber(u_clean, label_clean)
                 loss_poison_Huber = criterionHuber(u_poison, label_poison)
-                loss_clean_MSE = criterionMSE(u_clean, label_clean)
-                loss_poison_MSE = criterionMSE(u_poison, label_poison)
                 loss = loss_poison_tp * 15 + loss_clean_Huber + loss_poison_Huber
             else:
-                loss_clean_tp = criteriontp(u_clean, label_clean)
                 loss_clean_Huber = criterionHuber(u_clean, label_clean)
-                loss_clean_MSE = criterionMSE(u_clean, label_clean)
-                loss = loss_clean_tp + loss_clean_Huber + loss_clean_MSE
+                loss = loss_clean_Huber
         else:
             loss_clean_Huber = criterionHuber(u_clean, label_clean)
-            loss_clean_MSE = criterionMSE(u_clean, label_clean)
             if len(u_poison) > 0 and len(u_clean) > 0:
                 loss_poison_Huber = criterionHuber(u_poison, label_poison)
-                loss_poison_MSE = criterionMSE(u_poison, label_poison)
-                loss = loss_clean_Huber * args.k2 + loss_poison_Huber + loss_clean_MSE * args.k2 + loss_poison_MSE
+                loss = loss_clean_Huber + loss_poison_Huber
             elif len(u_clean) > 0:
-                loss = loss_clean_Huber * args.k2 + loss_clean_MSE * args.k2
+                loss = loss_clean_Huber
             else:
                 continue
         losses.update(loss.item(), image.size(0))
@@ -185,9 +165,7 @@ def train_with_grad_control(net, epoch, train_loader, criterionHuber, criterionM
         loss.backward()
         optimizer.step()
     print('epoch:', epoch, 'train loss:', losses.avg)
-    p0 = float(sim0) / num_clean if num_clean > 0 else 0
-    p1 = float(sim1) / num_poison if num_poison > 0 else 0
-    return (p0 - p1)
+    return 1
 
 def validate1(test_loader, dataset_loader, epoch, clean, net):
     net.eval()
@@ -220,8 +198,6 @@ if __name__ == "__main__":
     setup_seed(20)
     parser = argparse.ArgumentParser(description="attack")
     parser.add_argument('--learning_rate', type=float, default=5e-6, help='Learning rate for training')
-    parser.add_argument('--k1', type=float, default=1)
-    parser.add_argument('--k2', type=float, default=1)
     parser.add_argument('--epoch', type=int, default=100)
     parser.add_argument('--poison_ratio', type=float, default='0.1')
     parser.add_argument('--loss_func', type=str, default='mixHuber')
@@ -234,8 +210,7 @@ if __name__ == "__main__":
     parser.add_argument('--hash_method', type=str, default='HashNet')
     parser.add_argument('--bit', type=int, default='64')
     parser.add_argument('--backbone', type=str, default='ResNet50')
-    parser.add_argument('--d_backbone', type=str, default='ResNet50')
-    parser.add_argument('--dist_data', type=str, default='Gauss-I')
+    parser.add_argument('--shadow_data', type=str, default='Gauss-I')
     parser.add_argument('--model_dataset', type=str, default='voc2012')
     parser.add_argument('--scale', type=float, default=0.11)
     parser.add_argument('--method', type=int, default=1)
@@ -263,7 +238,7 @@ if __name__ == "__main__":
                      "Attack Accuracy": formatted_poison_acc,
                      "Clean Accuracy": formatted_clean_acc,
                      "select_label":args.select_label,
-                     "dist_data": str(args.dist_data),
+                     "shadow_data": str(args.shadow_data),
                      "model_dataset": str(args.model_dataset),
                      "poison_ratio":str(args.poison_ratio),
                      "train_len":str(args.train_len),
@@ -278,7 +253,7 @@ if __name__ == "__main__":
     }
     final_result.append(final_result_)
     header = ["time", "First Attack Accuracy", "First Clean Accuracy", "Attack Accuracy", "Clean Accuracy",
-              "dist_data", "model_dataset","select_label"
+              "shadow_data", "model_dataset","select_label"
                 , "poison_ratio", "train_len", "bit", "backbones", "hash_method", "ori_mAP", "scale", "learning_rate","method","layer"]f
     with open(filepath + '/ablation_results.csv', mode='a', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=header)
